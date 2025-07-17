@@ -98,17 +98,10 @@ void scheduler_main(Datum main_arg) {
             scheduler_poll_interval = 
                 GetConfigOptionInt("scheduler.poll_interval", 60000, false);
         }
-    
-        /* Проверка режима восстановления */
-        in_recovery = RecoveryInProgress();
-    
-        if (in_recovery) {
-            elog(DEBUG1, "scheduler: in recovery mode, skipping job processing");
-        } else {
-            /* Обработка задач */
-            process_pending_jobs();
-        }
-    
+        
+        /* Обработка задач */
+        process_pending_jobs();
+
         /* Финальная проверка прерываний */
         CHECK_FOR_INTERRUPTS();
     
