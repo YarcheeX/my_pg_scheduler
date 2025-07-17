@@ -39,7 +39,7 @@ void _PG_init(void) {
     worker.bgw_restart_time = BGW_NEVER_RESTART;
     worker.bgw_main = scheduler_main;
     worker.bgw_name = "pg-scheduler";
-    worker.bgw_library_name = "pg_scheduler";
+    worker.bgw_library_name = "my_pg_scheduler";
     worker.bgw_notify_pid = 0;
     
     RegisterBackgroundWorker(&worker);
@@ -76,11 +76,11 @@ void scheduler_main(Datum main_arg) {
                   scheduler_poll_interval,
                   WAIT_EVENT_BGWORKER_TIMEOUT);
     
-            /* Сброс защелки для следующего цикла */
-            ResetLatch(&MyProc->procLatch);
+        /* Сброс защелки для следующего цикла */
+        ResetLatch(&MyProc->procLatch);
     
-            /* Проверка смерти postmaster - критическая ошибка */
-            if (rc & WL_POSTMASTER_DEATH) {
+        /* Проверка смерти postmaster - критическая ошибка */
+        if (rc & WL_POSTMASTER_DEATH) {
             got_sigterm = true;
             break; // Немедленный выход
         }
@@ -135,7 +135,11 @@ static void process_pending_jobs(void) {
     /* Проверка прерываний перед началом транзакции */
     CHECK_FOR_INTERRUPTS();
     
-    /* Начинаем новую транзакцию */
+    /* Начинаем новую транзакцию 
+    (как я понял, чтобы использовать SPI функции, 
+    которые вызваны не из пользовательских C функций, 
+    использованных командами SQL, а как тут, то нужно
+    вручную создавать и завершать транзакцию)*/
     SetCurrentStatementStartTimestamp();
     StartTransactionCommand();
     PushActiveSnapshot(GetTransactionSnapshot());
@@ -146,16 +150,6 @@ static void process_pending_jobs(void) {
         PopActiveSnapshot();
         AbortCurrentTransaction();
         return;
-    }
-    
-    /* Проверка перезагрузки конфигурации */
-    if (ConfigReloadPending) {
-        ConfigReloadPending = false;
-        ProcessConfigFile(PGC_SIGHUP);
-        
-        /* Обновляем параметры */
-        scheduler_poll_interval = 
-            GetConfigOptionInt("scheduler.poll_interval", 60000, false);
     }
     
     /* Выбираем задачи, готовые к выполнению */
@@ -177,9 +171,6 @@ static void process_pending_jobs(void) {
         bool job_id_isnull, command_isnull;
         int64 job_id;
         char *command = NULL;
-        
-        /* Проверка прерываний перед обработкой задачи */
-        CHECK_FOR_INTERRUPTS();
         
         /* Извлекаем job_id */
         job_id_datum = SPI_getbinval(tuple, tupdesc, 1, &job_id_isnull);
@@ -232,10 +223,6 @@ static void process_pending_jobs(void) {
         /* Освобождаем память */
         pfree(command);
         
-        /* Периодическая проверка прерываний */
-        if (i % 10 == 0) {
-            CHECK_FOR_INTERRUPTS();
-        }
     }
     
     /* Завершаем работу с SPI и транзакцией */

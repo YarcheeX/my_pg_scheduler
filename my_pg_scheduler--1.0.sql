@@ -19,9 +19,8 @@ RETURNS TIMESTAMPTZ AS $$
 DECLARE
     next_time TIMESTAMPTZ;
 BEGIN
-    -- Упрощенная реализация (для учебного проекта)
-    -- В реальной реализации нужен полноценный парсер cron
-    RETURN NOW() + '1 min'::INTERVAL;
+    -- Пока так, нужен будет парсер cron
+    RETURN NOW() + '1 hour'::INTERVAL;
 END;
 $$ LANGUAGE plpgsql;
 
