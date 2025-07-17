@@ -69,34 +69,53 @@ void scheduler_main(Datum main_arg) {
     /* Основной рабочий цикл */
     while (!got_sigterm) {
         int rc;
-        bool in_recovery = false;
-        
-        /* Проверка прерываний перед длительной операцией */
+    
+        /* Ожидание события или таймаута */
+        rc = WaitLatch(&MyProc->procLatch,
+                  WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
+                  scheduler_poll_interval,
+                  WAIT_EVENT_BGWORKER_TIMEOUT);
+    
+            /* Сброс защелки для следующего цикла */
+            ResetLatch(&MyProc->procLatch);
+    
+            /* Проверка смерти postmaster - критическая ошибка */
+            if (rc & WL_POSTMASTER_DEATH) {
+            got_sigterm = true;
+            break; // Немедленный выход
+        }
+    
+        /* Проверка прерываний (отмена запроса и т.д.) */
         CHECK_FOR_INTERRUPTS();
+    
+        /* Обработка перезагрузки конфигурации */
+        if (ConfigReloadPending) {
+            elog(LOG, "scheduler: reloading configuration");
+            ConfigReloadPending = false;
+            ProcessConfigFile(PGC_SIGHUP);
         
-        /* Проверяем, находимся ли в режиме восстановления */
+            /* Обновляем параметры */
+            scheduler_poll_interval = 
+                GetConfigOptionInt("scheduler.poll_interval", 60000, false);
+        }
+    
+        /* Проверка режима восстановления */
         in_recovery = RecoveryInProgress();
-        
-        if (!in_recovery) {
-            /* Обрабатываем задачи */
+    
+        if (in_recovery) {
+            elog(DEBUG1, "scheduler: in recovery mode, skipping job processing");
+        } else {
+            /* Обработка задач */
             process_pending_jobs();
         }
-        
-        /* Ожидаем N секунд или сигнала */
-        rc = WaitLatch(&MyProc->procLatch,
-                      WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
-                      scheduler_poll_interval,
-                      WAIT_EVENT_BGWORKER_TIMEOUT);
-        
-        ResetLatch(&MyProc->procLatch);
-        
-        /* Проверяем смерть postmaster */
-        if (rc & WL_POSTMASTER_DEATH) {
-            got_sigterm = true;
-        }
-        
-        /* Проверка прерываний после ожидания */
+    
+        /* Финальная проверка прерываний */
         CHECK_FOR_INTERRUPTS();
+    
+        /* Дополнительная точка выхода */
+        if (got_sigterm) {
+            break;
+        }
     }
     
     elog(LOG, "PostgreSQL Scheduler shutting down");
