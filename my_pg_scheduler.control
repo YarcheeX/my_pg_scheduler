@@ -1,0 +1,4 @@
+comment = 'My postgresql shceduler extension'
+default_version = '1.0'
+module_pathname = '$libdir/my_pg_scheduler'
+relocatable = true
